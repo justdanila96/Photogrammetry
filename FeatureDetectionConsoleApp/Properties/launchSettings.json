@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "FeatureDetectionConsoleApp": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\Users\\danii\\Documents\\Photogrammetry\\00 Input Dataset\r\nC:\\Users\\danii\\Documents\\Photogrammetry\\01 Feature Detection"
+    }
+  }
+}
