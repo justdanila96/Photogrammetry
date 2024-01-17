@@ -169,8 +169,9 @@ namespace FeatureDetection {
 
         private static void TestLoadImage(int i, Layer step, string directory) {
 
-            void DownloadImage(float[] buffer, string imgName) {
+            void DownloadImage(float[]? buffer, string imgName) {
 
+                ArgumentNullException.ThrowIfNull(buffer);
                 using var img = ConvertToImage(buffer, step.Width, step.Height);
                 img.SaveAsJpeg(directory + $@"\{imgName}.jpg");
             }

@@ -7,6 +7,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Collections;
 using FBuffer2D = ILGPU.Runtime.MemoryBuffer2D<float, ILGPU.Stride2D.DenseX>;
+using Index = (int i, int j);
 
 namespace FeatureDetection {
     public partial class AKAZE(Accelerator accelerator, AKAZESettings settings) {
@@ -48,36 +49,33 @@ namespace FeatureDetection {
                 .ToArray();
 
             float kcontrast;
+            var smooth = new GaussKernel(0, offset);
             using (FBuffer2D original = ToGrayscale(image)) {
 
                 kcontrast = ComputeContrastFactor(original);
-                var smooth = new GaussKernel(0, offset);
                 SepConvolution(original, smooth, layersGPU[0].Lt);
             }
 
             layersGPU[0].Lt.CopyTo(layersGPU[0].LSmooth);
+
+            smooth = new GaussKernel(0, 1f);
+            var scharrX = new ScharrXKernel(false);
+            var scharrY = new ScharrYKernel(false);
 
             for (int i = 1; i < layersGPU.Length; i++) {
 
                 LayerGPU prevLayer = layersGPU[i - 1];
                 LayerGPU curLayer = layersGPU[i];
 
-                if (layers[i].Metadata.Level > layers[i - 1].Metadata.Level) {
-
+                if (layers[i].Metadata.Level <= layers[i - 1].Metadata.Level)
+                    prevLayer.Lt.CopyTo(curLayer.Lt);
+                else {
                     Halfsize(prevLayer.Lt, curLayer.Lt);
                     kcontrast *= 0.75f;
                 }
-                else {
-                    prevLayer.Lt.CopyTo(curLayer.Lt);
-                }
 
-                var smooth = new GaussKernel(0, 1f);
                 SepConvolution(curLayer.Lt, smooth, curLayer.LSmooth);
-
-                var scharrX = new ScharrXKernel(false);
                 SepConvolution(curLayer.LSmooth, scharrX, curLayer.Lx);
-
-                var scharrY = new ScharrYKernel(false);
                 SepConvolution(curLayer.LSmooth, scharrY, curLayer.Ly);
 
                 using FBuffer2D flow = PeronaMalikG2Diff(curLayer.Lx, curLayer.Ly, kcontrast);
@@ -108,7 +106,7 @@ namespace FeatureDetection {
                 ComputeHessian(lxx, lxy, lyy, MathF.Pow(kernelSize, 4f), curLayer.Ldet);
             }
 
-            Parallel.For(0, layers.Length, i => {
+            _ = Parallel.For(0, layers.Length, i => {
 
                 LayerGPU layerGPU = layersGPU[i];
                 float[] lt = layerGPU.Lt.View.To1DView().GetAsArray1D();
@@ -121,7 +119,7 @@ namespace FeatureDetection {
             });
         }
 
-        private static bool FindNeighbor((int i, int j) inPos, HashSet<(int, int)> points, int R, out (int, int) point) {
+        private static bool FindNeighbor(Index inPos, HashSet<Index> points, int R, out Index point) {
 
             point = (0, 0);
             int R2 = R * R;
@@ -147,9 +145,9 @@ namespace FeatureDetection {
             return false;
         }
 
-        private static HashSet<(int, int)> FindKeypoints(Layer step, float threshold) {
+        private static HashSet<Index> FindKeypoints(Layer step, float threshold) {
 
-            var result = new HashSet<(int, int)>();
+            var result = new HashSet<Index>();
             ReadOnlySpan2D<float> Ldet = step.LdetAsMatrix();
 
             for (int i = step.Metadata.Border; i < step.Height - step.Metadata.Border; i++) {
@@ -169,9 +167,9 @@ namespace FeatureDetection {
                         continue;
                     }
 
-                    var index = (i, j);
+                    Index index = (i, j);
 
-                    if (FindNeighbor(index, result, step.Metadata.SigmaSize, out (int, int) point)) {
+                    if (FindNeighbor(index, result, step.Metadata.SigmaSize, out Index point)) {
 
                         (int pi, int pj) = point;
 
@@ -190,20 +188,20 @@ namespace FeatureDetection {
             return result;
         }
 
-        private HashSet<(int, int)>[] FindScaleSpaceExtrema() {
+        private HashSet<Index>[] FindScaleSpaceExtrema() {
 
-            var kptsByLayers = new HashSet<(int, int)>[layers.Length];
+            var kptsByLayers = new HashSet<Index>[layers.Length];
             Parallel.For(0, layers.Length, i => {
                 kptsByLayers[i] = FindKeypoints(layers[i], settings.Threshold);
             });
 
             for (int k = 1; k < layers.Length; k++) {
 
-                HashSet<(int, int)> kpts = kptsByLayers[k];
+                HashSet<Index> kpts = kptsByLayers[k];
                 if (kpts.Count == 0)
                     continue;
 
-                HashSet<(int, int)> kptsPrev = kptsByLayers[k - 1];
+                HashSet<Index> kptsPrev = kptsByLayers[k - 1];
                 if (kptsPrev.Count == 0)
                     continue;
 
@@ -214,26 +212,23 @@ namespace FeatureDetection {
 
                 foreach ((int i, int j) in kpts) {
 
-                    var scaledIndex = (i * ratio, j * ratio);
+                    Index scaledIndex = (i * ratio, j * ratio);
 
-                    if (FindNeighbor(scaledIndex, kptsPrev, radius, out (int, int) neighbor)) {
+                    if (FindNeighbor(scaledIndex, kptsPrev, radius, out Index neighbor)
+                        && Ldet[i, j] > LdetPrev[neighbor.i, neighbor.j]) {
 
-                        (int ni, int nj) = neighbor;
-
-                        if (Ldet[i, j] > LdetPrev[ni, nj]) {
-                            kptsPrev.Remove(neighbor);
-                        }
+                        kptsPrev.Remove(neighbor);
                     }
                 }
             }
 
             for (int k = layers.Length - 2; k >= 0; k--) {
 
-                HashSet<(int, int)> kpts = kptsByLayers[k];
+                HashSet<Index> kpts = kptsByLayers[k];
                 if (kpts.Count == 0)
                     continue;
 
-                HashSet<(int, int)> kptsNext = kptsByLayers[k + 1];
+                HashSet<Index> kptsNext = kptsByLayers[k + 1];
                 if (kptsNext.Count == 0)
                     continue;
 
@@ -245,15 +240,12 @@ namespace FeatureDetection {
 
                 foreach ((int i, int j) in kpts) {
 
-                    var scaledIndex = (i / ratio, j / ratio);
+                    Index scaledIndex = (i / ratio, j / ratio);
 
-                    if (FindNeighbor(scaledIndex, kptsNext, radius, out (int, int) neighbor)) {
+                    if (FindNeighbor(scaledIndex, kptsNext, radius, out Index neighbor)
+                        && Ldet[i, j] > LdetNext[neighbor.i, neighbor.j]) {
 
-                        (int ni, int nj) = neighbor;
-
-                        if (Ldet[i, j] > LdetNext[ni, nj]) {
-                            kptsNext.Remove(neighbor);
-                        }
+                        kptsNext.Remove(neighbor);
                     }
                 }
             }
@@ -270,12 +262,12 @@ namespace FeatureDetection {
             float Dyy = ldet[i + 1, j] + ldet[i - 1, j] - 2f * ldet[i, j];
             float Dxy = (ldet[i + 1, j + 1] + ldet[i - 1, j - 1] - ldet[i - 1, j + 1] - ldet[i + 1, j - 1]) / 4f;
 
-            Matrix<float> A = Matrix<float>.Build.DenseOfRowMajor(2, 2, [Dxx, Dxy, Dxy, Dyy]);
-            Vector<float> B = Vector<float>.Build.DenseOfArray([-Dx, -Dy]);
+            var A = Matrix<float>.Build.DenseOfRowMajor(2, 2, [Dxx, Dxy, Dxy, Dyy]);
+            var B = Vector<float>.Build.DenseOfArray([-Dx, -Dy]);
             return A.Solve(B);
         }
 
-        private List<Keypoint> DetectKeypoints(HashSet<(int, int)>[] kptsByLayers) {
+        private List<Keypoint> DetectKeypoints(HashSet<Index>[] kptsByLayers) {
 
             object locker = new();
             List<Keypoint> result = [];
@@ -286,7 +278,7 @@ namespace FeatureDetection {
 
                 (k, _, list) => {
 
-                    HashSet<(int, int)> kpts = kptsByLayers[k];
+                    HashSet<Index> kpts = kptsByLayers[k];
                     if (kpts.Count == 0)
                         return list;
 
@@ -338,14 +330,14 @@ namespace FeatureDetection {
                     .Select(metadata => {
                         int width = img.Width / metadata.Ratio;
                         int height = img.Height / metadata.Ratio;
-                        return new Layer(metadata, width, height, [], [], [], []);
+                        return new Layer(metadata, width, height);
                     })
                     .ToArray();
 
                 FillPyramid(img);
             }
 
-            HashSet<(int, int)>[] kptsByLayers = FindScaleSpaceExtrema();
+            HashSet<Index>[] kptsByLayers = FindScaleSpaceExtrema();
             kpts = DetectKeypoints(kptsByLayers);
 
             descr = [];
@@ -362,7 +354,7 @@ namespace FeatureDetection {
                     .Select(metadata => {
                         int width = img.Width / metadata.Ratio;
                         int height = img.Height / metadata.Ratio;
-                        return new Layer(metadata, width, height, [], [], [], []);
+                        return new Layer(metadata, width, height);
                     })
                     .ToArray();
 

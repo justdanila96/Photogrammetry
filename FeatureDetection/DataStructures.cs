@@ -10,13 +10,27 @@ namespace FeatureDetection {
 
     internal readonly record struct LayerMetadata(int Level, int Sublevel, int Ratio, float ETime, float ESigma, int SigmaSize, int Border);
 
-    internal readonly record struct Layer(LayerMetadata Metadata, int Width, int Height, float[] Lt, float[] Lx, float[] Ly, float[] Ldet);
+    internal readonly record struct Layer(LayerMetadata Metadata, int Width, int Height, float[]? Lt, float[]? Lx, float[]? Ly, float[]? Ldet) {
+        public Layer(LayerMetadata metadata, int width, int height) : this(metadata, width, height, null, null, null, null) { }
+    }
 
     internal static class LayerExtensions {
-        public static ReadOnlySpan2D<float> LtAsMatrix(this Layer layer) => new(layer.Lt, layer.Height, layer.Width);
-        public static ReadOnlySpan2D<float> LxAsMatrix(this Layer layer) => new(layer.Lx, layer.Height, layer.Width);
-        public static ReadOnlySpan2D<float> LyAsMatrix(this Layer layer) => new(layer.Ly, layer.Height, layer.Width);
-        public static ReadOnlySpan2D<float> LdetAsMatrix(this Layer layer) => new(layer.Ldet, layer.Height, layer.Width);
+        public static ReadOnlySpan2D<float> LtAsMatrix(this Layer layer) =>
+            layer.Lt != null
+            ? new(layer.Lt, layer.Height, layer.Width)
+            : throw new NullReferenceException("Lt is empty");
+        public static ReadOnlySpan2D<float> LxAsMatrix(this Layer layer) =>
+            layer.Lx != null
+            ? new(layer.Lx, layer.Height, layer.Width)
+            : throw new NullReferenceException("Lx is empty");
+        public static ReadOnlySpan2D<float> LyAsMatrix(this Layer layer) =>
+            layer.Ly != null
+            ? new(layer.Ly, layer.Height, layer.Width)
+            : throw new NullReferenceException("Ly is empty");
+        public static ReadOnlySpan2D<float> LdetAsMatrix(this Layer layer) =>
+            layer.Ldet != null
+            ? new(layer.Ldet, layer.Height, layer.Width)
+            : throw new NullReferenceException("Ldet is empty");
     }
 
     internal readonly record struct LayerGPU(FBuffer2D Lt, FBuffer2D LSmooth, FBuffer2D Lx, FBuffer2D Ly, FBuffer2D Ldet) {
