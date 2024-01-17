@@ -22,9 +22,11 @@ namespace FeatureDetectionConsoleApp {
             return kptBin;
         }
 
+        private static int DescrByteSize(int bitLength) => (bitLength - 1) / 8 + 1;
+
         private static byte[] DescriptorToByteArray(BitArray descr) {
 
-            int descrSize = (descr.Length - 1) / 8 + 1;
+            int descrSize = DescrByteSize(descr.Length);
             var descrBin = new byte[descrSize];
             descr.CopyTo(descrBin, 0);
             return descrBin;
@@ -77,7 +79,7 @@ namespace FeatureDetectionConsoleApp {
                 using var writer = new BinaryWriter(outputFileStream);
 
                 writer.Write((ulong)kpts.Count);
-                writer.Write((ulong)descr[0].Length);
+                writer.Write((ulong)DescrByteSize(descr[0].Length));
 
                 foreach ((Keypoint keypoint, BitArray descriptor) in Enumerable.Zip(kpts, descr)) {
 

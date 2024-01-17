@@ -1,6 +1,8 @@
 ﻿using CommunityToolkit.HighPerformance;
+using FeatureDetection;
 using ILGPU;
 using ILGPU.Algorithms;
+using System.Runtime.InteropServices;
 using ByteMatrix = ILGPU.Runtime.ArrayView2D<byte, ILGPU.Stride2D.DenseX>;
 using IntMatrix = ILGPU.Runtime.ArrayView2D<int, ILGPU.Stride2D.DenseX>;
 
@@ -46,10 +48,11 @@ namespace FeatureMatchingConsoleApp {
             using var reader = new BinaryReader(fileStream);
             int descrCount = (int)reader.ReadUInt64();
             int descrSize = (int)reader.ReadUInt64();
+            int kptSize = Marshal.SizeOf<Keypoint>();
 
             for (int i = 0; i < descrCount; i++) {
 
-                reader.ReadBytes(28);
+                reader.ReadBytes(kptSize);
                 byte[] descriptor = reader.ReadBytes(descrSize);
                 yield return descriptor;
             }

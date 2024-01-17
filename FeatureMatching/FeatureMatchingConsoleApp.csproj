@@ -13,4 +13,8 @@
     <PackageReference Include="ILGPU.Algorithms" Version="1.5.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\FeatureDetection\FeatureDetection.csproj" />
+  </ItemGroup>
+
 </Project>
