@@ -106,17 +106,47 @@ namespace FeatureDetection {
                 ComputeHessian(lxx, lxy, lyy, MathF.Pow(kernelSize, 4f), curLayer.Ldet);
             }
 
-            _ = Parallel.For(0, layers.Length, i => {
+            Parallel.For(0, layers.Length, i => {
 
                 LayerGPU layerGPU = layersGPU[i];
-                float[] lt = layerGPU.Lt.View.To1DView().GetAsArray1D();
-                float[] lx = layerGPU.Lx.View.To1DView().GetAsArray1D();
-                float[] ly = layerGPU.Ly.View.To1DView().GetAsArray1D();
-                float[] ldet = layerGPU.Ldet.View.To1DView().GetAsArray1D();
+                int sz = layers[i].Width * layers[i].Height;
+
+                float[] lt = new float[sz];
+                CopyFromGPU(layerGPU.Lt, lt);
+
+                float[] lx = new float[sz];
+                CopyFromGPU(layerGPU.Lx, lx);
+
+                float[] ly = new float[sz];
+                CopyFromGPU(layerGPU.Ly, ly);
+
+                float[] ldet = new float[sz];
+                CopyFromGPU(layerGPU.Ldet, ldet);
 
                 layers[i] = layers[i] with { Lt = lt, Lx = lx, Ly = ly, Ldet = ldet };
                 layerGPU.Dispose();
             });
+        }
+
+        private static void CopyFromGPU(FBuffer2D input, Span<float> output, int maxChunkSize = 1_000_000) {
+
+            var buffer = input.View.To1DView();
+            int N = (int)Math.Ceiling((double)buffer.IntLength / maxChunkSize);
+
+            for (int k = 0; k < N; k++) {
+
+                int chunkSize =
+                    k == N - 1
+                    ? buffer.IntLength - k * maxChunkSize
+                    : maxChunkSize;
+
+                var offset = new Index1D(k * maxChunkSize);
+                var extent = new Index1D(chunkSize);
+
+                Span<float> outputChunkSpan = output.Slice(offset, extent);
+                var subview = buffer.SubView(offset, extent).AsContiguous();
+                subview.CopyToCPU(outputChunkSpan);                
+            }
         }
 
         private static bool FindNeighbor(Index inPos, HashSet<Index> points, int R, out Index point) {
